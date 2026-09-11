@@ -1,0 +1,30 @@
+[
+  {
+    "scenario": "afternoon",
+    "expected": "awaiting_approval",
+    "actual": "awaiting_approval",
+    "passed": true,
+    "model_calls": 2
+  },
+  {
+    "scenario": "missing",
+    "expected": "needs_input",
+    "actual": "needs_input",
+    "passed": true,
+    "model_calls": 1
+  },
+  {
+    "scenario": "no_slots",
+    "expected": "no_slots",
+    "actual": "no_slots",
+    "passed": true,
+    "model_calls": 2
+  },
+  {
+    "scenario": "injection",
+    "expected": "needs_input",
+    "actual": "needs_input",
+    "passed": true,
+    "model_calls": 1
+  }
+]

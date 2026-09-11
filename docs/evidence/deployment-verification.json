@@ -1,0 +1,32 @@
+{
+  "checked_at_utc": "2026-09-11T17:40:37.415098+00:00",
+  "base_url": "https://examflow-922216333816.asia-northeast3.run.app",
+  "model_mode": "gemini",
+  "agent_cards": "passed",
+  "internal_endpoint_protection": "passed",
+  "scenarios": [
+    {
+      "order_id": "EX-1001",
+      "expected": "awaiting_approval",
+      "actual": "awaiting_approval",
+      "a2a_responses": 2,
+      "session_isolation": "passed",
+      "approval": "confirmed",
+      "idempotency": "passed"
+    },
+    {
+      "order_id": "EX-1002",
+      "expected": "needs_input",
+      "actual": "needs_input",
+      "a2a_responses": 1,
+      "session_isolation": "passed"
+    },
+    {
+      "order_id": "EX-1003",
+      "expected": "no_slots",
+      "actual": "no_slots",
+      "a2a_responses": 2,
+      "session_isolation": "passed"
+    }
+  ]
+}

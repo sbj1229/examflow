@@ -1,4 +1,5 @@
 from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -8,7 +9,9 @@ class StrictModel(BaseModel):
 
 class RunInput(StrictModel):
     order_id: Literal["EX-1001", "EX-1002", "EX-1003"]
-    request: str = Field(default="가능한 검사 예약 시간을 찾아주세요.", min_length=1, max_length=500)
+    request: str = Field(
+        default="가능한 검사 예약 시간을 찾아주세요.", min_length=1, max_length=500
+    )
 
 
 class ReadinessDecision(StrictModel):

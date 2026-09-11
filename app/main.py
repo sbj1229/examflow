@@ -1,7 +1,6 @@
 import asyncio
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import time
@@ -10,15 +9,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.types import AgentCard, AgentCapabilities, AgentSkill
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
 from app.agents import ExamExecutor
-from app.contracts import RunInput, AgentJob, ApprovalInput
+from app.contracts import AgentJob, ApprovalInput, RunInput
 from app.models import mode
 from app.tools_client import hospital_tools
 
@@ -27,7 +27,16 @@ ACTIVE = {}
 LOCKS = {}
 RATE = {}
 SECRET = os.getenv("INTERNAL_SECRET", secrets.token_hex(32))
-TERMINAL = {"needs_input", "no_slots", "awaiting_approval", "confirmed", "conflict", "failed", "cancelled"}
+TERMINAL = {
+    "needs_input",
+    "no_slots",
+    "awaiting_approval",
+    "confirmation_unknown",
+    "confirmed",
+    "conflict",
+    "failed",
+    "cancelled",
+}
 PORT = os.getenv("PORT", "8080")
 
 
@@ -56,6 +65,7 @@ async def boundary(request: Request, call_next):
         origin = request.headers.get("origin")
         if origin:
             from urllib.parse import urlparse
+
             if urlparse(origin).netloc != request.headers.get("host"):
                 return JSONResponse({"detail": "다른 출처의 요청 차단"}, status_code=403)
         try:
@@ -70,10 +80,19 @@ async def boundary(request: Request, call_next):
     request.state.session_id = sid
     response = await call_next(request)
     if cookie != sign(sid):
-        response.set_cookie("examflow_session", sign(sid), httponly=True, samesite="lax", secure=os.getenv("COOKIE_SECURE", "false") == "true", max_age=86400)
+        response.set_cookie(
+            "examflow_session",
+            sign(sid),
+            httponly=True,
+            samesite="lax",
+            secure=os.getenv("COOKIE_SECURE", "false") == "true",
+            max_age=86400,
+        )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+    )
     return response
 
 
@@ -81,25 +100,91 @@ def event_sink(run_id, agent):
     def emit(kind, label, data):
         run = RUNS.get(run_id)
         if run and run["state"] != "cancelled":
-            run["events"].append({"seq": len(run["events"])+1, "at_ms": round((time.monotonic()-run["started"])*1000), "kind": kind, "agent": agent, "label": label, "data": data})
+            run["events"].append(
+                {
+                    "seq": len(run["events"]) + 1,
+                    "at_ms": round((time.monotonic() - run["started"]) * 1000),
+                    "kind": kind,
+                    "agent": agent,
+                    "label": label,
+                    "data": data,
+                }
+            )
+
     return emit
 
 
 def card(name):
-    return AgentCard(name=f"ExamFlow {name}", description="합성 검사 예약 행정 담당 에이전트", url=f"{os.getenv('PUBLIC_BASE_URL', f'http://127.0.0.1:{PORT}')}/a2a/{name}/", version="1.0.0", capabilities=AgentCapabilities(streaming=False), default_input_modes=["text"], default_output_modes=["application/json"], skills=[AgentSkill(id=name, name=name, description="준비 확인" if name == "readiness" else "일정 조정", tags=["hospital", "synthetic"])])
+    return AgentCard(
+        name=f"ExamFlow {name}",
+        description="합성 검사 예약 행정 담당 에이전트",
+        url=f"{os.getenv('PUBLIC_BASE_URL', f'http://127.0.0.1:{PORT}')}/a2a/{name}/",
+        version="1.0.0",
+        capabilities=AgentCapabilities(streaming=False),
+        default_input_modes=["text"],
+        default_output_modes=["application/json"],
+        skills=[
+            AgentSkill(
+                id=name,
+                name=name,
+                description="준비 확인" if name == "readiness" else "일정 조정",
+                tags=["hospital", "synthetic"],
+            )
+        ],
+    )
+
+
+class BoundedTaskStore(InMemoryTaskStore):
+    """SDK Task 보관도 제한해 장시간 공개 데모의 메모리 증가를 막는다."""
+
+    async def save(self, task, context=None):
+        async with self.lock:
+            if task.id not in self.tasks and len(self.tasks) >= 512:
+                for task_id, previous in list(self.tasks.items()):
+                    if previous.status.state.value in {
+                        "completed",
+                        "failed",
+                        "canceled",
+                        "input-required",
+                    }:
+                        del self.tasks[task_id]
+                        break
+            self.tasks[task.id] = task
 
 
 for agent_name in ("readiness", "scheduling"):
-    handler = DefaultRequestHandler(ExamExecutor(agent_name, event_sink), InMemoryTaskStore())
-    app.mount(f"/a2a/{agent_name}", A2AStarletteApplication(card(agent_name), handler, max_content_length=8192).build())
+    handler = DefaultRequestHandler(ExamExecutor(agent_name, event_sink), BoundedTaskStore())
+    app.mount(
+        f"/a2a/{agent_name}",
+        A2AStarletteApplication(card(agent_name), handler, max_content_length=8192).build(),
+    )
 
 
 async def call_agent(name, job):
     emit = event_sink(job.run_id, "orchestrator")
-    emit("a2a.send", name, {"method": "message/send", "protocol": "A2A 0.3", "order_id": job.order_id})
-    payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "message/send", "params": {"message": {"messageId": str(uuid.uuid4()), "role": "user", "parts": [{"kind": "text", "text": job.model_dump_json()}]}}}
+    emit(
+        "a2a.send",
+        name,
+        {"method": "message/send", "protocol": "A2A 0.3", "order_id": job.order_id},
+    )
+    payload = {
+        "jsonrpc": "2.0",
+        "id": str(uuid.uuid4()),
+        "method": "message/send",
+        "params": {
+            "message": {
+                "messageId": str(uuid.uuid4()),
+                "role": "user",
+                "parts": [{"kind": "text", "text": job.model_dump_json()}],
+            }
+        },
+    }
     async with httpx.AsyncClient(timeout=100) as client:
-        response = await client.post(f"http://127.0.0.1:{PORT}/a2a/{name}/", json=payload, headers={"x-internal-secret": SECRET})
+        response = await client.post(
+            f"http://127.0.0.1:{PORT}/a2a/{name}/",
+            json=payload,
+            headers={"x-internal-secret": SECRET},
+        )
         response.raise_for_status()
         envelope = response.json()
     if "error" in envelope:
@@ -137,8 +222,12 @@ async def execute_run(run_id):
     except Exception as exc:
         if run["state"] != "cancelled":
             run["state"] = "failed"
-            run["error"] = "도구 또는 모델 요청을 완료하지 못했습니다. 연결·할당량을 확인한 뒤 새 요청으로 재시도하세요."
-            event_sink(run_id, "orchestrator")("run.failed", "처리 실패", {"error_type": type(exc).__name__})
+            run["error"] = (
+                "도구 또는 모델 요청을 완료하지 못했습니다. 연결·할당량을 확인한 뒤 새 요청으로 재시도하세요."
+            )
+            event_sink(run_id, "orchestrator")(
+                "run.failed", "처리 실패", {"error_type": type(exc).__name__}
+            )
     finally:
         ACTIVE.pop(run_id, None)
 
@@ -146,33 +235,52 @@ async def execute_run(run_id):
 def owned(run_id, request):
     run = RUNS.get(run_id)
     if not run or run["owner"] != request.state.session_id:
-        raise HTTPException(404, "실행을 찾을 수 없습니다. 세션이 만료되었으면 새 요청을 시작하세요.")
+        raise HTTPException(
+            404, "실행을 찾을 수 없습니다. 세션이 만료되었으면 새 요청을 시작하세요."
+        )
     return run
 
 
 def public(run):
-    return {k:v for k,v in run.items() if k not in {"owner", "started"}}
+    return {k: v for k, v in run.items() if k not in {"owner", "started"}}
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "model_mode": mode(), "synthetic_data": True, "version": "1.0.0"}
+    return {
+        "status": "ok",
+        "model_mode": mode(),
+        "synthetic_data": True,
+        "version": "1.0.0",
+    }
 
 
 @app.post("/api/runs", status_code=202)
 async def create_run(body: RunInput, request: Request):
     now = time.monotonic()
     for rid, run in list(RUNS.items()):
-        if now-run["started"] > 3600 and rid not in ACTIVE:
+        if now - run["started"] > 3600 and rid not in ACTIVE:
             RUNS.pop(rid, None)
             LOCKS.pop(rid, None)
     sid = request.state.session_id
-    RATE[sid] = [t for t in RATE.get(sid, []) if now-t < 3600]
+    for old_sid, timestamps in list(RATE.items()):
+        if not timestamps or now - timestamps[-1] >= 3600:
+            RATE.pop(old_sid, None)
+    RATE[sid] = [t for t in RATE.get(sid, []) if now - t < 3600]
     if len(RATE[sid]) >= 20 or len(ACTIVE) >= 4 or len(RUNS) >= 200:
         raise HTTPException(429, "데모 실행 한도에 도달했습니다. 잠시 후 다시 시도하세요.")
     RATE[sid].append(now)
     rid = str(uuid.uuid4())
-    RUNS[rid] = {"id": rid, "owner": sid, "input": body.model_dump(), "state": "queued", "events": [], "started": now, "version": 1, "model_mode": mode()}
+    RUNS[rid] = {
+        "id": rid,
+        "owner": sid,
+        "input": body.model_dump(),
+        "state": "queued",
+        "events": [],
+        "started": now,
+        "version": 1,
+        "model_mode": mode(),
+    }
     LOCKS[rid] = asyncio.Lock()
     ACTIVE[rid] = asyncio.create_task(execute_run(rid))
     return public(RUNS[rid])
@@ -189,21 +297,35 @@ async def approve(run_id: str, body: ApprovalInput, request: Request):
     async with LOCKS[run_id]:
         if run["state"] == "confirmed":
             return public(run)
-        if run["state"] != "awaiting_approval" or body.version != run["version"]:
+        if (
+            run["state"] not in {"awaiting_approval", "confirmation_unknown"}
+            or body.version != run["version"]
+        ):
             raise HTTPException(409, "현재 상태에서는 확정할 수 없습니다.")
-        if time.monotonic()-run["started"] > 900:
+        if run["state"] == "awaiting_approval" and time.monotonic() - run["started"] > 900:
             raise HTTPException(409, "예약안이 만료되었습니다. 새 요청으로 시간을 조회하세요.")
         run["state"] = "confirming"
         emit = event_sink(run_id, "approval")
         emit("approval.received", "사용자 승인", {"version": body.version})
         try:
             async with hospital_tools(emit) as call:
-                result = await call("reserve_demo_slot", {"session_id": run["owner"], "order_id": run["input"]["order_id"], "slot_id": run["schedule"]["selected"]["id"], "run_id": run_id})
+                result = await call(
+                    "reserve_demo_slot",
+                    {
+                        "session_id": run["owner"],
+                        "order_id": run["input"]["order_id"],
+                        "slot_id": run["schedule"]["selected"]["id"],
+                        "run_id": run_id,
+                    },
+                )
             run["reservation"] = result
             run["state"] = result["status"]
+            run.pop("error", None)
         except Exception:
-            run["state"] = "failed"
-            run["error"] = "확정 결과를 확인하지 못했습니다. 같은 실행의 확정 결과를 운영자가 확인해야 합니다."
+            run["state"] = "confirmation_unknown"
+            run["error"] = (
+                "확정 응답을 확인하지 못했습니다. '확정 결과 재확인'을 누르면 같은 실행 번호로 중복 없이 재확인합니다."
+            )
         return public(run)
 
 
@@ -211,7 +333,7 @@ async def approve(run_id: str, body: ApprovalInput, request: Request):
 async def cancel(run_id: str, request: Request):
     run = owned(run_id, request)
     async with LOCKS[run_id]:
-        if run["state"] in {"confirmed", "confirming"}:
+        if run["state"] in {"confirmed", "confirming", "confirmation_unknown"}:
             raise HTTPException(409, "이미 확정된 예약은 이 데모에서 취소할 수 없습니다.")
         event_sink(run_id, "user")("run.cancelled", "사용자 취소", {})
         run["state"] = "cancelled"

@@ -1,5 +1,7 @@
 """독립 프로세스로 실행하는 공식 MCP stdio 서버."""
+
 from mcp.server.fastmcp import FastMCP
+
 from app.catalog import ORDERS, POLICY, SLOTS
 from app.storage import available_slots, reserve
 
@@ -23,7 +25,10 @@ def get_preparation_policy() -> dict:
 @mcp.tool()
 def find_slots(session_id: str, exam: str) -> dict:
     """현재 데모 세션에서 예약 가능한 검사 시간을 조회한다."""
-    return {"slots": available_slots(session_id, exam), "source": "synthetic-scheduling/v1"}
+    return {
+        "slots": available_slots(session_id, exam),
+        "source": "synthetic-scheduling/v1",
+    }
 
 
 @mcp.tool()
