@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn==0.52.4
+mcp==1.30.0
+a2a-sdk[http-server]==0.3.26
+google-genai==2.23.0
+httpx==0.28.1

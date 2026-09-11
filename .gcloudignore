@@ -1,0 +1,14 @@
+.git/
+.venv/
+.tmp/
+.pytest_cache/
+**/__pycache__/
+.env
+*.db
+*.db-*
+credentials*.json
+*service-account*.json
+docs/
+deliverables/
+tests/
+scripts/
