@@ -10,6 +10,6 @@
 - 최종 발표자료: deliverables/ExamFlow_5분_발표_최종.pptx. 7장 전 페이지 재렌더링 검토 완료. 기존 PPTX는 이전 버전으로 보존했습니다.
 - 공개 데모: https://examflow-922216333816.asia-northeast3.run.app
 - 공개 저장소: https://github.com/sbj1229/examflow
-- 외부 제출 상태: 최종 코드·문서·발표자료의 GitHub 일괄 게시 승인 대기. 원격 저장소의 초기 구현과 최신 로컬 결과물을 구분합니다.
+- 공개 게시 상태: 사용자 승인 후 최종 코드·문서·검증 기록·발표자료를 GitHub main에 반영했습니다. 채용 담당자에게 제출 메시지를 보내는 행위와는 구분합니다.
 - Antigravity 패키지와 스크립트 실행은 검증했습니다. Antigravity IDE/CLI 자체 자동 발견, 실제 PowerPoint 재생, 물리 모바일 기기 검증은 미수행입니다.
 - 권한·비용·영속성 제한은 [배포 구성](deployment.md), 실행 증거는 [검증 기록](verification.md)에 기록했습니다.
