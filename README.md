@@ -122,7 +122,7 @@ Python 자동 테스트 25개와 JavaScript 비동기 회귀 검사 3개를 통�
 ```bash
 python -m pytest -q tests --junitxml=.tmp/test-results.xml
 node --test tests/test_ui.cjs
-python skills/examflow/scripts/invoke.py --order EX-1002 --state-file .tmp/missing-case.json
+python .agent/skills/examflow/scripts/invoke.py --order EX-1002 --state-file .tmp/missing-case.json
 ```
 
 로컬 실제 모델 검증은 표준 ADC 인증 후 `python scripts/live_smoke.py --project <본인 프로젝트 ID>`로 실행합니다. 포트 8082를 사용하며 생성된 서버는 검증 종료 시 정리합니다. 개인 임시 SDK 경로를 요구하지 않습니다. API 키를 쓰는 경우 GOOGLE_CLOUD_PROJECT를 비우고 GEMINI_API_KEY를 환경변수로 설정합니다.
@@ -140,12 +140,12 @@ Cloud Build용 `cloudbuild.yaml`과 Dockerfile을 제공합니다. Linux 컨테�
 
 ## Antigravity 스킬
 
-`skills/examflow/SKILL.md`와 호출 스크립트를 제공합니다. 패키지를 `.agents/skills/examflow/`에 복사하면 Antigravity의 프로젝트 스킬 검색 위치에 놓을 수 있습니다. 원본 패키지 위치에서도 스크립트를 직접 실행할 수 있습니다.
+`.agent/skills/examflow/SKILL.md`와 호출 스크립트를 제공합니다.
 
 ```bash
-python skills/examflow/scripts/invoke.py --order EX-1001 --request "오후 예약" --state-file .tmp/proposal.json
+python .agent/skills/examflow/scripts/invoke.py --order EX-1001 --request "오후 예약" --state-file .tmp/proposal.json
 # 출력된 의뢰·시간·근거를 확인하고 승인한 뒤 동일 실행을 확정
-python skills/examflow/scripts/invoke.py --resume --approve --state-file .tmp/proposal.json
+python .agent/skills/examflow/scripts/invoke.py --resume --approve --state-file .tmp/proposal.json
 ```
 
 스크립트는 상태 파일에 세션과 실행 번호를 보관해 호출을 나눠도 동일 예약안을 유지합니다. 상태 파일의 쿠키는 비공개로 보관합니다. 새 요청은 새 파일 이름을 사용합니다. `--approve`는 --resume과 함께, 사용자가 제시된 예약안을 승인한 경우에만 사용합니다. 원격 서비스에는 두 명령 모두 동일한 --base-url을 추가합니다. [Antigravity 호출 예시](docs/assignment-answers.md#antigravity-시연)를 참고하세요.
@@ -155,3 +155,4 @@ python skills/examflow/scripts/invoke.py --resume --approve --state-file .tmp/pr
 - 요청과 A2A Task는 메모리, 예약과 모델 호출 카운터는 인스턴스 로컬 SQLite에 저장합니다.
 - 세션당 시간당 20개 요청, 동시 실행 4개, 보관 실행 200개로 제한합니다.
 - 모델 형식 오류는 1회 재시도하며 원본과 다른 `ready` 또는 후보 밖 `slot_id`는 실패로 처리합니다.
+
