@@ -247,6 +247,112 @@ def test_stale_approval_rejected(client):
     assert client.post(f"/api/runs/{run['id']}/approve", json={"version": 99}).status_code == 409
 
 
+def slot_body(slot, **changes):
+    return {
+        **{k: slot[k] for k in ("exam", "day", "time", "room", "enabled", "version")},
+        **changes,
+    }
+
+
+def test_pool_edits_change_agent_candidates(client):
+    before = client.get("/api/workspace").json()
+    slot = next(s for s in before["slots"] if s["id"] == "CT-PM")
+    assert client.put("/api/slots/CT-PM", json=slot_body(slot, enabled=False)).status_code == 200
+    assert finished(client, start(client))["state"] == "no_slots"
+    created = client.post(
+        "/api/slots",
+        json={
+            "exam": "CT",
+            "day": "다음 운영일",
+            "time": "15:30",
+            "room": "CT 2실",
+            "enabled": True,
+        },
+    )
+    assert created.status_code == 201
+    proposal = finished(client, start(client))
+    assert proposal["schedule"]["selected"]["time"] == "15:30"
+    result = client.post(f"/api/runs/{proposal['id']}/approve", json={"version": 1}).json()
+    assert result["state"] == "confirmed"
+    rows = client.get("/api/workspace").json()["reservations"]
+    assert rows[0]["id"] == proposal["id"]
+    assert rows[0]["slot"]["time"] == "15:30"
+
+
+def test_changed_slot_rejects_stale_proposal(client):
+    run = finished(client, start(client))
+    selected = run["schedule"]["selected"]
+    assert (
+        client.put(
+            "/api/slots/" + selected["id"], json=slot_body(selected, time="14:30")
+        ).status_code
+        == 200
+    )
+    response = client.post(f"/api/runs/{run['id']}/approve", json={"version": 1})
+    assert response.json()["state"] == "conflict"
+    assert client.get("/api/workspace").json()["reservations"] == []
+
+
+def test_cancelled_booking_reopens_slot_without_resurrection(client):
+    run = finished(client, start(client))
+    rid = run["id"]
+    assert (
+        client.post(f"/api/runs/{rid}/approve", json={"version": 1}).json()["state"] == "confirmed"
+    )
+    slot = run["schedule"]["selected"]
+    assert (
+        client.put("/api/slots/" + slot["id"], json=slot_body(slot, enabled=False)).status_code
+        == 409
+    )
+    cancelled = client.post(f"/api/reservations/{rid}/cancel", json={})
+    assert cancelled.status_code == 200
+    assert cancelled.json()["reservations"][0]["status"] == "cancelled"
+    assert client.post(f"/api/reservations/{rid}/cancel", json={}).status_code == 200
+    assert client.get("/api/runs/" + rid).json()["state"] == "cancelled"
+    assert client.post(f"/api/runs/{rid}/approve", json={"version": 1}).status_code == 409
+    assert (
+        client.put("/api/slots/" + slot["id"], json=slot_body(slot, time="14:45")).status_code
+        == 200
+    )
+    assert client.get("/api/workspace").json()["reservations"][0]["slot"]["time"] == slot["time"]
+    next_run = finished(client, start(client))
+    assert next_run["schedule"]["selected"]["id"] == slot["id"]
+    assert next_run["schedule"]["selected"]["time"] == "14:45"
+    assert (
+        client.post(f"/api/runs/{next_run['id']}/approve", json={"version": 1}).json()["state"]
+        == "confirmed"
+    )
+
+
+def test_management_session_isolation_and_versions(client):
+    slot = next(s for s in client.get("/api/workspace").json()["slots"] if s["id"] == "CT-PM")
+    body = slot_body(slot, enabled=False)
+    assert client.put("/api/slots/CT-PM", json=body).status_code == 200
+    assert client.put("/api/slots/CT-PM", json=body).status_code == 409
+    with httpx.Client(base_url=BASE) as other:
+        assert (
+            next(s for s in other.get("/api/workspace").json()["slots"] if s["id"] == "CT-PM")[
+                "enabled"
+            ]
+            is True
+        )
+        assert other.post("/api/reservations/not-owned/cancel", json={}).status_code == 404
+    assert (
+        client.post(
+            "/api/slots",
+            json={"exam": "CT", "day": "다음 운영일", "time": "14:00", "room": "CT 1실"},
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/api/slots",
+            json={"exam": "CT", "day": "다음 운영일", "time": "25:00", "room": "CT 2실"},
+        ).status_code
+        == 422
+    )
+
+
 def test_skill_separate_processes_approve_the_same_run(tmp_path):
     state_file = tmp_path / "skill-session.json"
     command = [

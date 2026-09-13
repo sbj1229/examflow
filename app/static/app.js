@@ -8,7 +8,7 @@ const states = {
   awaiting_approval: "담당자 승인 대기",
   confirming: "예약 확정 중",
   confirmation_unknown: "확정 결과 재확인 필요",
-  confirmed: "데모 예약 완료",
+  confirmed: "예약 완료",
   conflict: "예약 충돌",
   failed: "처리 실패",
   cancelled: "요청 취소",
@@ -60,7 +60,10 @@ function error(err) {
 }
 function render(run) {
   current = run;
-  $("status").textContent = states[run.state] || run.state;
+  $("status").textContent =
+    run.reservation?.status === "cancelled"
+      ? "예약 취소"
+      : states[run.state] || run.state;
   syncControls();
   $("approve").hidden = !["awaiting_approval", "confirmation_unknown"].includes(
     run.state,
@@ -68,7 +71,7 @@ function render(run) {
   $("approve").textContent =
     run.state === "confirmation_unknown"
       ? "확정 결과 재확인"
-      : "이 시간으로 데모 예약 확정";
+      : "이 시간으로 예약 확정";
   $("cancel").hidden = ![
     "queued",
     "checking",
@@ -109,11 +112,7 @@ function render(run) {
         list.append(text("li", label + " 필요"));
       r.append(
         list,
-        text(
-          "p",
-          "담당자가 원본 접수 정보를 보완한 뒤 다시 요청해야 합니다. 데모에서는 준비 완료 사례를 선택해 다음 단계를 볼 수 있습니다.",
-          "hint",
-        ),
+        text("p", "미완료 항목을 확인한 뒤 다시 요청하세요.", "hint"),
       );
     }
     r.append(
@@ -138,8 +137,10 @@ function render(run) {
         text(
           "span",
           run.state === "confirmed"
-            ? "데모 예약 확정"
-            : "제안 시간 · 아직 확정되지 않음",
+            ? "예약 확정"
+            : run.reservation?.status === "cancelled"
+              ? "취소된 예약"
+              : "제안 시간 · 아직 확정되지 않음",
           "booking-label",
         ),
         text("div", slot.time, "booking-time"),
@@ -161,14 +162,14 @@ function render(run) {
       text(
         "p",
         run.state === "confirmed"
-          ? "합성 데이터에 예약을 기록했습니다. 실제 병원 예약이나 연락은 발생하지 않습니다."
+          ? "예약을 기록했습니다. 예약 현황에서 확인하거나 취소할 수 있습니다."
           : run.reservation.reason,
         "summary",
       ),
     );
   }
   if (run.error) r.append(text("p", run.error, "summary"));
-  if (run.state === "cancelled")
+  if (run.state === "cancelled" && run.reservation?.status !== "cancelled")
     r.append(
       text(
         "p",
@@ -191,6 +192,8 @@ function render(run) {
     trace.append(d);
   }
   renderedCount = run.events.length;
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new CustomEvent("examflow:run", { detail: run }));
 }
 async function poll() {
   if (!current) return;
@@ -288,4 +291,8 @@ api("/api/health")
   })
   .catch(() => {
     $("mode").textContent = "서버 연결 실패";
+  });
+if (typeof window !== "undefined")
+  window.addEventListener("examflow:workspace-updated", () => {
+    if (current && !changing) poll();
   });

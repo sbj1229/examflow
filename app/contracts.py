@@ -36,3 +36,12 @@ class AgentJob(StrictModel):
 
 class ApprovalInput(StrictModel):
     version: int = Field(ge=1)
+
+
+class SlotInput(StrictModel):
+    exam: Literal["CT", "MRI", "US"]
+    day: str = Field(min_length=1, max_length=40, pattern=r".*\S.*")
+    time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    room: str = Field(min_length=1, max_length=40, pattern=r".*\S.*")
+    enabled: bool = True
+    version: int | None = Field(default=None, ge=1)

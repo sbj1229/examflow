@@ -17,8 +17,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import storage
 from app.agents import ExamExecutor
-from app.contracts import AgentJob, ApprovalInput, RunInput
+from app.contracts import AgentJob, ApprovalInput, RunInput, SlotInput
 from app.models import mode
 from app.tools_client import hospital_tools
 
@@ -238,6 +239,9 @@ def owned(run_id, request):
         raise HTTPException(
             404, "실행을 찾을 수 없습니다. 세션이 만료되었으면 새 요청을 시작하세요."
         )
+    if storage.is_reservation_cancelled(request.state.session_id, run_id):
+        run["state"] = "cancelled"
+        run["reservation"] = {"status": "cancelled", "reason": "예약 현황에서 취소한 예약입니다."}
     return run
 
 
@@ -255,6 +259,45 @@ def health():
     }
 
 
+@app.get("/api/workspace")
+def get_workspace(request: Request):
+    return storage.workspace(request.state.session_id)
+
+
+@app.post("/api/slots", status_code=201)
+def create_slot(body: SlotInput, request: Request):
+    try:
+        storage.edit_slot(request.state.session_id, body.model_dump(exclude={"version"}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return storage.workspace(request.state.session_id)
+
+
+@app.put("/api/slots/{slot_id}")
+def update_slot(slot_id: str, body: SlotInput, request: Request):
+    try:
+        storage.edit_slot(
+            request.state.session_id, body.model_dump(exclude={"version"}), slot_id, body.version
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return storage.workspace(request.state.session_id)
+
+
+@app.post("/api/reservations/{run_id}/cancel")
+async def cancel_booking(run_id: str, request: Request):
+    # 승인과 관리 화면의 취소도 같은 실행 잠금을 사용한다.
+    lock = LOCKS.get(run_id, asyncio.Lock())
+    async with lock:
+        try:
+            storage.cancel_reservation(request.state.session_id, run_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+    return storage.workspace(request.state.session_id)
+
+
 @app.post("/api/runs", status_code=202)
 async def create_run(body: RunInput, request: Request):
     now = time.monotonic()
@@ -268,7 +311,7 @@ async def create_run(body: RunInput, request: Request):
             RATE.pop(old_sid, None)
     RATE[sid] = [t for t in RATE.get(sid, []) if now - t < 3600]
     if len(RATE[sid]) >= 20 or len(ACTIVE) >= 4 or len(RUNS) >= 200:
-        raise HTTPException(429, "데모 실행 한도에 도달했습니다. 잠시 후 다시 시도하세요.")
+        raise HTTPException(429, "실행 한도에 도달했습니다. 잠시 후 다시 시도하세요.")
     RATE[sid].append(now)
     rid = str(uuid.uuid4())
     RUNS[rid] = {
@@ -316,6 +359,7 @@ async def approve(run_id: str, body: ApprovalInput, request: Request):
                         "order_id": run["input"]["order_id"],
                         "slot_id": run["schedule"]["selected"]["id"],
                         "run_id": run_id,
+                        "expected_version": run["schedule"]["selected"].get("version", 1),
                     },
                 )
             run["reservation"] = result
@@ -334,7 +378,7 @@ async def cancel(run_id: str, request: Request):
     run = owned(run_id, request)
     async with LOCKS[run_id]:
         if run["state"] in {"confirmed", "confirming", "confirmation_unknown"}:
-            raise HTTPException(409, "이미 확정된 예약은 이 데모에서 취소할 수 없습니다.")
+            raise HTTPException(409, "확정된 예약은 예약 현황에서 취소하세요.")
         event_sink(run_id, "user")("run.cancelled", "사용자 취소", {})
         run["state"] = "cancelled"
     return public(run)
