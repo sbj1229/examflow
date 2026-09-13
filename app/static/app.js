@@ -25,7 +25,15 @@ const terminals = new Set([
 ]);
 let current = null,
   timer = null,
-  renderedCount = 0;
+  renderedCount = 0,
+  generation = 0,
+  changing = false;
+function syncControls() {
+  $("submit").disabled =
+    changing || !!(current && !terminals.has(current.state));
+  $("approve").disabled = changing;
+  $("cancel").disabled = changing;
+}
 function text(tag, value, className) {
   const el = document.createElement(tag);
   el.textContent = value;
@@ -53,8 +61,7 @@ function error(err) {
 function render(run) {
   current = run;
   $("status").textContent = states[run.state] || run.state;
-  const busy = !terminals.has(run.state);
-  $("submit").disabled = busy;
+  syncControls();
   $("approve").hidden = !["awaiting_approval", "confirmation_unknown"].includes(
     run.state,
   );
@@ -62,7 +69,6 @@ function render(run) {
     run.state === "confirmation_unknown"
       ? "확정 결과 재확인"
       : "이 시간으로 데모 예약 확정";
-  $("approve").disabled = false;
   $("cancel").hidden = ![
     "queued",
     "checking",
@@ -188,10 +194,15 @@ function render(run) {
 }
 async function poll() {
   if (!current) return;
+  const expectedGeneration = generation,
+    runId = current.id;
   try {
-    render(await api("/api/runs/" + current.id));
+    const run = await api("/api/runs/" + runId);
+    if (expectedGeneration !== generation || current?.id !== runId) return;
+    render(run);
     if (!terminals.has(current.state)) timer = setTimeout(poll, 700);
   } catch (err) {
+    if (expectedGeneration !== generation || current?.id !== runId) return;
     error(err);
     $("submit").disabled = false;
     $("cancel").hidden = true;
@@ -199,46 +210,52 @@ async function poll() {
 }
 $("request-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (changing || $("submit").disabled) return;
+  generation++;
+  changing = true;
   clearTimeout(timer);
   $("error").textContent = "";
-  $("submit").disabled = true;
-  renderedCount = 0;
+  syncControls();
   try {
-    render(
-      await api("/api/runs", {
-        order_id: $("order").value,
-        request: $("request").value,
-      }),
-    );
+    const run = await api("/api/runs", {
+      order_id: $("order").value,
+      request: $("request").value,
+    });
+    renderedCount = 0;
+    render(run);
     poll();
   } catch (err) {
     error(err);
-    $("submit").disabled = false;
+  } finally {
+    changing = false;
+    syncControls();
   }
 });
-$("approve").addEventListener("click", async () => {
-  $("approve").disabled = true;
+async function changeRun(action) {
+  if (!current || changing) return;
+  const runId = current.id;
+  const expectedGeneration = ++generation;
+  changing = true;
+  clearTimeout(timer);
+  syncControls();
   $("error").textContent = "";
   try {
-    render(
-      await api("/api/runs/" + current.id + "/approve", {
-        version: current.version,
-      }),
+    const run = await api(
+      "/api/runs/" + runId + "/" + action,
+      action === "approve" ? { version: current.version } : {},
     );
+    if (expectedGeneration === generation && current?.id === runId) render(run);
   } catch (err) {
     error(err);
-    $("approve").disabled = false;
-  }
-});
-$("cancel").addEventListener("click", async () => {
-  clearTimeout(timer);
-  try {
-    render(await api("/api/runs/" + current.id + "/cancel", {}));
-  } catch (err) {
-    error(err);
+    // 응답이 유실돼도 같은 실행을 조회해 확정 상태를 복구한다.
     poll();
+  } finally {
+    changing = false;
+    syncControls();
   }
-});
+}
+$("approve").addEventListener("click", () => changeRun("approve"));
+$("cancel").addEventListener("click", () => changeRun("cancel"));
 document.querySelectorAll("[data-example]").forEach((button) =>
   button.addEventListener("click", () => {
     const ex = button.dataset.example;

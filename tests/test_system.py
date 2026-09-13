@@ -247,6 +247,82 @@ def test_stale_approval_rejected(client):
     assert client.post(f"/api/runs/{run['id']}/approve", json={"version": 99}).status_code == 409
 
 
+def test_skill_separate_processes_approve_the_same_run(tmp_path):
+    state_file = tmp_path / "skill-session.json"
+    command = [
+        sys.executable,
+        "skills/examflow/scripts/invoke.py",
+        "--base-url",
+        BASE,
+        "--state-file",
+        str(state_file),
+    ]
+
+    def invoke(*args):
+        return subprocess.run(
+            command + list(args),
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=dict(os.environ, PYTHONUTF8="1"),
+            timeout=40,
+        )
+
+    created = invoke("--order", "EX-1001", "--request", "오후 예약")
+    assert created.returncode == 0, created.stderr
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    approved = invoke("--resume", "--approve")
+    assert approved.returncode == 0, approved.stderr
+    assert '"state": "confirmed"' in approved.stdout
+    assert json.loads(state_file.read_text(encoding="utf-8"))["run_id"] == state["run_id"]
+    repeated = invoke("--resume", "--approve")
+    assert repeated.returncode == 0, repeated.stderr
+    with httpx.Client(base_url=BASE) as client:
+        client.cookies.set("examflow_session", state["session_cookie"])
+        run = client.get("/api/runs/" + state["run_id"]).json()
+    assert run["reservation"]["reservation_id"] == state["run_id"]
+    assert len([e for e in run["events"] if e["kind"] == "a2a.send"]) == 2
+    assert invoke().returncode != 0  # 기존 상태 파일을 덮어쓰지 않음
+
+
+def test_skill_rejects_approval_without_saved_proposal(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "skills/examflow/scripts/invoke.py",
+            "--approve",
+            "--state-file",
+            str(tmp_path / "unused.json"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 2
+    assert not (tmp_path / "unused.json").exists()
+
+
+def test_skill_rejects_cross_server_session_forwarding(tmp_path):
+    path = tmp_path / "session.json"
+    path.write_text(json.dumps({"base_url": BASE, "session_cookie": "test", "run_id": "test"}))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "skills/examflow/scripts/invoke.py",
+            "--resume",
+            "--base-url",
+            "http://127.0.0.1:1",
+            "--state-file",
+            str(path),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+
+
 @pytest.mark.asyncio
 async def test_confirmation_response_loss_reconciles_same_run(monkeypatch, tmp_path):
     from contextlib import asynccontextmanager

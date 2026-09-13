@@ -1,7 +1,9 @@
-"""일회성 gcloud 액세스 토큰을 메모리에만 전달해 Vertex AI 실제 흐름을 검증한다."""
+"""표준 ADC 또는 GEMINI_API_KEY 환경으로 로컬 실제 모델 흐름을 검증한다."""
 
+import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -10,27 +12,25 @@ from pathlib import Path
 import httpx
 
 root = Path(__file__).resolve().parents[1]
-env = dict(os.environ, CLOUDSDK_CONFIG=str(root / ".tmp/gcloud-config"), PYTHONUTF8="1")
-token = subprocess.check_output(
-    [
-        sys.executable,
-        str(root / ".tmp/tools/google-cloud-sdk/lib/gcloud.py"),
-        "auth",
-        "print-access-token",
-        "--account=sbj1229.2@gmail.com",
-    ],
-    env=env,
-    text=True,
-).strip()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--project", default=os.getenv("GOOGLE_CLOUD_PROJECT"))
+args = parser.parse_args()
+if not args.project and not os.getenv("GEMINI_API_KEY"):
+    parser.error("ADC 인증 후 --project를 지정하거나 GEMINI_API_KEY를 설정하세요.")
+env = dict(os.environ, PYTHONUTF8="1")
+if args.project:
+    env["GOOGLE_CLOUD_PROJECT"] = args.project
 env.update(
     MODEL_MODE="gemini",
     PORT="8082",
-    GOOGLE_CLOUD_PROJECT="project-462d529a-f067-4a26-bbb",
-    GOOGLE_CLOUD_LOCATION="global",
-    EXAMFLOW_ACCESS_TOKEN=token,
+    GOOGLE_CLOUD_LOCATION=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
     EXAMFLOW_DB=str(root / ".tmp/live-smoke.db"),
 )
 output = root / ".tmp/live-server.log"
+output.parent.mkdir(parents=True, exist_ok=True)
+with socket.socket() as probe:
+    if probe.connect_ex(("127.0.0.1", 8082)) == 0:
+        raise SystemExit("포트 8082가 사용 중입니다. 기존 서버를 종료한 뒤 재실행하세요.")
 with output.open("w", encoding="utf-8") as log:
     process = subprocess.Popen(
         [
@@ -50,11 +50,15 @@ with output.open("w", encoding="utf-8") as log:
     )
     try:
         for _ in range(100):
+            if process.poll() is not None:
+                raise RuntimeError("테스트 서버 시작 실패. .tmp/live-server.log를 확인하세요.")
             try:
                 if httpx.get("http://127.0.0.1:8082/api/health").status_code == 200:
                     break
             except httpx.TransportError:
                 time.sleep(0.1)
+        else:
+            raise RuntimeError("테스트 서버 시작 시간 초과")
         scenarios = [
             (
                 "afternoon",
