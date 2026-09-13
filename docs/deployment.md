@@ -1,15 +1,15 @@
 # 배포 구성과 운영
 
-2026-09-12 KST 확인. 웹 서비스는 Cloud Run 서울 리전, 모델은 Vertex AI의 global 엔드포인트를 사용합니다. 전체 모델 처리가 서울에 한정된다는 의미는 아닙니다.
+2026-09-13 KST 확인. 웹 서비스는 Cloud Run 서울 리전, 모델은 Vertex AI의 global 엔드포인트를 사용합니다. 전체 모델 처리가 서울에 한정된다는 의미는 아닙니다.
 
 | 항목 | 확인한 값 |
 |---|---|
 | 프로젝트 | project-462d529a-f067-4a26-bbb |
 | 서비스 URL | https://examflow-922216333816.asia-northeast3.run.app |
 | 리전 | asia-northeast3 |
-| 최종 리비전 / 트래픽 | examflow-00004-fph / 100% |
-| 최종 빌드 | a1118862-cbeb-4f30-beb1-98f916472b43 |
-| 이미지 SHA256 | 899d0d6f57679951577870e560bd019d58b758c0110c08071bc3a669653b188f |
+| 최종 리비전 / 트래픽 | examflow-00005-szb / 100% |
+| 최종 빌드 | a1756237-408a-4016-baa3-04ee8775dbce |
+| 이미지 SHA256 | ee7841f5989bcef6a3f06d0c0688cd061ac234748e68c9ef4519cf497f059f69 |
 | 모델 | Gemini 2.5 Flash |
 | CPU / 메모리 | 1 vCPU / 1 GiB |
 | 서비스 인스턴스 | 최소 0 / 최대 1 |
@@ -52,7 +52,7 @@ gcloud run deploy examflow --image=$IMAGE --project=$PROJECT --region=$REGION \
 
 ```bash
 gcloud run services update-traffic examflow \
-  --to-revisions=examflow-00003-2lf=100 \
+  --to-revisions=examflow-00004-fph=100 \
   --project=project-462d529a-f067-4a26-bbb --region=asia-northeast3
 ```
 

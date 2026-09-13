@@ -10,16 +10,17 @@
 
 - [공개 저장소](https://github.com/sbj1229/examflow)
 - [라이브 데모 — Cloud Run](https://examflow-922216333816.asia-northeast3.run.app)
-- [5분 발표 PPTX](deliverables/ExamFlow_5분_발표.pptx) · [발표 대본](deliverables/발표_대본.md)
+- [5분 발표 PPTX](deliverables/ExamFlow_5분_발표_최종.pptx) · [발표 대본](deliverables/발표_대본.md)
 - [검증 기록](docs/verification.md) · [개발 회고](docs/retrospective.md) · [설계 결정](docs/decisions.md)
 - [요구사항 대응 및 최종 검토](docs/review.md) · [배포 구성](docs/deployment.md)
+- [과제 요구사항에 대한 질문과 구현 답변](docs/assignment-answers.md)
 
 ## 시연 흐름
 
 1. **EX-1001 / 오후 예약 요청**: 서류 접수 완료 → 오후 가용 시간 선택 → 담당자 승인 → 데모 예약 확정.
 2. **EX-1002 / 서류 누락**: 연락처 확인과 사전 확인표 접수 누락 → `needs_input` → 일정 조회 중단.
 3. **EX-1003 / 빈 후보**: 서류 확인 완료 → 가용 시간 없음 → `no_slots`.
-4. **동일 세션에서 같은 의뢰를 두 번 조회 후 확정**: 첫 요청 성공 → 두 번째 요청 `conflict`.
+4. **충돌 검증은 API 테스트로 확인**: 같은 HTTP 세션에서 같은 오후 시간의 예약안 두 개를 먼저 만든 뒤 차례로 승인합니다. 첫 요청은 confirmed, 두 번째는 conflict입니다. `python -m pytest -q tests/test_system.py -k conflicting_proposals`로 재현합니다. 첫 예약을 확정한 뒤 새로 조회하면 no_slots가 될 수 있으므로 이 순서와 구분합니다.
 
 각 시연은 브라우저 세션별 합성 예약 공간을 사용합니다. 다른 사용자의 데모 예약에 영향을 주지 않습니다. 기존 예약을 유지한 채 새 의뢰를 생성하는 기능은 범위에 포함하지 않았습니다. 새 브라우저 세션에서 기본 사례를 다시 시연할 수 있습니다.
 
@@ -110,12 +111,15 @@ Vertex AI를 활성화한 프로젝트에서 ADC 인증 후 `MODEL_MODE=gemini`,
 
 ## 검증
 
-자동 테스트 18개 통과. 공개 배포에서는 실제 Gemini로 정상 예약·중복 승인·서류 누락·가용 시간 없음·세션 격리·A2A 접근 경계를 검증했습니다. `scripts/verify_deployment.py --base-url <서비스 URL>`로 배포 검증을 재실행할 수 있으며 실제 모델 호출 비용이 발생합니다.
+Python 자동 테스트 21개와 JavaScript 비동기 회귀 검사 3개를 통과했습니다. 서로 다른 범위이며 실제 모델 검증과 합산하지 않습니다. 공개 배포에서는 실제 Gemini로 정상 예약·중복 승인·서류 누락·가용 시간 없음·세션 격리·A2A 접근 경계를 검증했습니다. `python scripts/verify_deployment.py --base-url <서비스 URL>`로 배포 검증을 재실행할 수 있으며 실제 모델 호출 비용이 발생합니다.
 
 ```bash
 python -m pytest -q tests --junitxml=.tmp/test-results.xml
-python skills/examflow/scripts/invoke.py --order EX-1002
+node --test tests/test_ui.cjs
+python skills/examflow/scripts/invoke.py --order EX-1002 --state-file .tmp/missing-case.json
 ```
+
+로컬 실제 모델 검증은 표준 ADC 인증 후 `python scripts/live_smoke.py --project <본인 프로젝트 ID>`로 실행합니다. 포트 8082를 사용하며 생성된 서버는 검증 종료 시 정리합니다. 개인 임시 SDK 경로를 요구하지 않습니다. API 키를 쓰는 경우 GOOGLE_CLOUD_PROJECT를 비우고 GEMINI_API_KEY를 환경변수로 설정합니다.
 
 자동 테스트는 별도 포트 8081에서 서버를 띄우며 실제 A2A HTTP와 MCP stdio를 통과합니다. 모델은 fixture로 고정합니다. 모델 경계 검증에서는 의도적으로 잘못된 구조화 결과를 주입합니다. 실제 Gemini 호출 검증 결과는 [검증 기록](docs/verification.md)에서 별도로 확인합니다.
 
@@ -133,10 +137,12 @@ Cloud Build용 `cloudbuild.yaml`과 Dockerfile을 제공합니다. Linux 컨테�
 `skills/examflow/SKILL.md`와 호출 스크립트를 제공합니다. 패키지를 `.agents/skills/examflow/`에 복사하면 Antigravity의 프로젝트 스킬 검색 위치에 놓을 수 있습니다. 원본 패키지 위치에서도 스크립트를 직접 실행할 수 있습니다.
 
 ```bash
-python skills/examflow/scripts/invoke.py --order EX-1001 --request "오후 예약"
+python skills/examflow/scripts/invoke.py --order EX-1001 --request "오후 예약" --state-file .tmp/proposal.json
+# 출력된 의뢰·시간·근거를 확인하고 승인한 뒤 동일 실행을 확정
+python skills/examflow/scripts/invoke.py --resume --approve --state-file .tmp/proposal.json
 ```
 
-스크립트는 같은 HTTP 세션을 유지하고 최대 190초 동안 상태를 확인합니다. `--approve`는 사용자가 해당 데모 예약 확정을 요청한 경우에만 사용합니다.
+스크립트는 상태 파일에 세션과 실행 번호를 보관해 호출을 나눠도 동일 예약안을 유지합니다. 상태 파일의 쿠키는 비공개로 보관합니다. 새 요청은 새 파일 이름을 사용합니다. `--approve`는 --resume과 함께, 사용자가 제시된 예약안을 승인한 경우에만 사용합니다. 원격 서비스에는 두 명령 모두 동일한 --base-url을 추가합니다. [Antigravity 호출 예시](docs/assignment-answers.md#antigravity-시연)를 참고하세요.
 
 ## 운영 범위와 한계
 

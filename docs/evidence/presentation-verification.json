@@ -1,11 +1,11 @@
 {
-  "file": "deliverables/ExamFlow_5분_발표.pptx",
-  "sha256": "b4550a68b89a13d5d1a60b3c01836c6ff4ca2707b55ae31dc130d2c946ed375a",
-  "bytes": 33557,
+  "file": "deliverables/ExamFlow_5분_발표_최종.pptx",
+  "sha256": "55c7cf2f7bd57c89504952abac71b02e3ffa5249a1053540ec4d12d503b17d9b",
+  "bytes": 33657,
   "slides": 7,
-  "editable_tables": 3,
+  "native_tables": 3,
   "package_integrity": "passed",
   "final_reimport": "passed",
-  "visual_review": "7 of 7 final rendered pages reviewed",
+  "final_rendered_pages_reviewed": 7,
   "native_powerpoint_execution": "not performed"
 }

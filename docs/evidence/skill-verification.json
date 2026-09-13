@@ -1,0 +1,11 @@
+{
+  "checked_at_utc": "2026-09-13T05:30:01.546487+00:00",
+  "run_id": "dfd3abff-94dd-4ee2-bc4b-4d24fec76115",
+  "before": "awaiting_approval",
+  "after": "confirmed",
+  "same_run": true,
+  "same_reservation_id": true,
+  "additional_model_calls_on_approval": 0,
+  "mode": "gemini",
+  "session_cookie_included": false
+}

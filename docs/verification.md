@@ -1,10 +1,10 @@
 # 검증 기록
 
-검증일: 2026-09-11~12 KST. 자동 테스트, 실제 모델 호출, 브라우저 확인을 구분했습니다. 특정 합성 사례의 관찰 결과이며 전체 입력에 대한 성공률이 아닙니다.
+검증일: 2026-09-11~13 KST. 자동 테스트, 실제 모델 호출, 브라우저 확인을 구분했습니다. 특정 합성 사례의 관찰 결과이며 전체 입력에 대한 성공률이 아닙니다.
 
 ## 자동 기능 검증
 
-Python 3.12에서 `python -m pytest -q --junitxml=.tmp/test-results.xml` 실행: **18 passed in 13.27s**. A2A는 실제 HTTP, MCP는 독립 stdio 프로세스로 동작합니다. 모델은 fixture로 고정합니다.
+Python 3.12에서 `python -m pytest -q --junitxml=.tmp/test-results.xml` 실행: **21 passed in 14.44s**. A2A는 실제 HTTP, MCP는 독립 stdio 프로세스로 동작합니다. 모델은 fixture로 고정합니다.
 
 | 범위 | 확인한 결과 |
 |---|---|
@@ -21,6 +21,10 @@ Python 3.12에서 `python -m pytest -q --junitxml=.tmp/test-results.xml` 실행:
 
 Ruff와 Prettier의 코드·형식 검사도 통과했습니다. 별도의 침투 시험을 의미하지 않습니다.
 
+## 승인 흐름 추가 회귀 검증
+
+Python 검사에는 스킬의 별도 프로세스 조회·동일 실행 승인·반복 승인, 사전 조회 없는 승인 거부, 다른 서버로 세션 전송 거부를 추가했습니다. Node `node --test tests/test_ui.cjs`는 중복 조작 잠금, 취소 이전 폴링 응답 무시, 승인 응답 유실 후 동일 실행 조회의 3개 검사를 통과했습니다.
+
 ## 실제 Gemini 검증
 
 로컬 서버와 Vertex AI Gemini 2.5 Flash로 네 사례를 실행했습니다. `scripts/live_smoke.py`의 [실행 결과 요약](evidence/local-gemini-verification.json)을 제공합니다.
@@ -36,7 +40,7 @@ Ruff와 Prettier의 코드·형식 검사도 통과했습니다. 별도의 침�
 
 ## 최종 공개 배포
 
-리비전 `examflow-00004-fph`에 `scripts/verify_deployment.py`를 실행했습니다. [실행 시각과 결과](evidence/deployment-verification.json)를 확인할 수 있습니다.
+리비전 `examflow-00005-szb`에 `scripts/verify_deployment.py`를 실행했습니다. [실행 시각과 결과](evidence/deployment-verification.json)를 확인할 수 있습니다.
 
 - 실제 gemini 모드 확인.
 - EX-1001: A2A 응답 2개, CT-PM 선택, 승인 후 confirmed, 반복 승인 결과 동일.
@@ -45,7 +49,9 @@ Ruff와 Prettier의 코드·형식 검사도 통과했습니다. 별도의 침�
 - 각 실행을 다른 세션에서 조회하면 404. 인증 없는 내부 A2A 실행은 403.
 - 두 Agent Card의 프로토콜 버전 0.3.0과 공개 URL 확인.
 
-스킬의 `invoke.py`도 공개 서비스에서 실제 모델부터 합성 예약 확정까지 실행했습니다. 검증 범위가 겹치므로 테스트 수에 합산하지 않았습니다.
+수정된 스킬의 invoke.py를 공개 서비스에서 조회와 승인으로 나누어 실행했습니다. [스킬 검증 근거](evidence/skill-verification.json)에서 동일 run ID·예약 ID와 승인 시 추가 모델 호출 0회를 확인할 수 있습니다. 검증 범위가 겹치므로 테스트 수에 합산하지 않았습니다.
+
+최신 브라우저 검증에서는 승인 처리 중 새 요청·승인·취소 버튼이 비활성화되고, confirmed 결과 뒤 새 요청 버튼이 복구됨을 확인했습니다.
 
 ## 브라우저와 발표자료
 
